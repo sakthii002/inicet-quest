@@ -1,0 +1,25 @@
+{
+  "name": "INI-CET Quest // 8-Bit Dungeon Crawler",
+  "short_name": "INICET Quest",
+  "description": "Gamified 35-Day High-Yield Dungeon Study Tracker for INI-CET",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#08070f",
+  "theme_color": "#0c0a18",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
