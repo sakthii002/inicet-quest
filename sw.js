@@ -1,8 +1,9 @@
 // INI-CET Quest Service Worker - Offline Caching & PWA
-const CACHE_NAME = 'inicet-quest-cache-v1';
+const CACHE_NAME = 'inicet-quest-cache-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './ini-questv2.html',
   './inicet-quest.html',
   './manifest.json',
   './favicon.png',
