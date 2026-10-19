@@ -1898,6 +1898,9 @@ service cloud.firestore {
         if (raw) {
           try { cloudConfig = Object.assign({}, cloudConfig, JSON.parse(raw)); } catch (e) {}
         }
+        if (cloudConfig.firebaseRoom) {
+          cloudConfig.firebaseRoom = cloudConfig.firebaseRoom.trim().toLowerCase();
+        }
       }
 
       function saveCloudConfig() {
@@ -2294,6 +2297,9 @@ service cloud.firestore {
             firestoreDb.settings({ experimentalForceLongPolling: true });
           } catch (e) {}
 
+          if (cloudConfig.firebaseRoom) {
+            cloudConfig.firebaseRoom = cloudConfig.firebaseRoom.trim().toLowerCase();
+          }
           const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
 
           firestoreUnsub = docRef.onSnapshot({ includeMetadataChanges: true }, function(doc) {
@@ -2367,9 +2373,10 @@ service cloud.firestore {
 
       function handleIncomingRemoteState(remoteState, remoteUpdatedAt) {
         const merged = mergeSaveStates(state, remoteState);
-        const hasChanges = JSON.stringify(merged) !== JSON.stringify(state);
+        const hasLocalChanges = JSON.stringify(merged) !== JSON.stringify(state);
+        const hasRemoteChanges = JSON.stringify(merged) !== JSON.stringify(remoteState);
 
-        if (hasChanges) {
+        if (hasLocalChanges) {
           isRemoteSyncUpdate = true;
           state = merged;
           safeSetStorage(SAVE_KEY, JSON.stringify(state));
@@ -2378,6 +2385,12 @@ service cloud.firestore {
           playSfx('sync');
           logMsg('⚡ WARP SYNC: Progress synchronized from cloud!', 'heal');
           showToast('☁️ Cloud progress synced!');
+        }
+
+        // Two-way sync: If local had progress that cloud was missing (e.g. quests completed on PC),
+        // push the combined merged state back to the cloud so mobile gets it!
+        if (hasRemoteChanges) {
+          pushToFirebase(true);
         }
 
         cloudConfig.lastSyncTime = Date.now();
@@ -2439,7 +2452,7 @@ service cloud.firestore {
           testBtn.textContent = '⏳ TESTING...';
         }
 
-        const room = (document.getElementById('fbRoomInput') ? document.getElementById('fbRoomInput').value : '').trim();
+        const room = (document.getElementById('fbRoomInput') ? document.getElementById('fbRoomInput').value : '').trim().toLowerCase();
         const cfgStr = (document.getElementById('fbConfigInput') ? document.getElementById('fbConfigInput').value : '').trim();
 
         if (!room) {
@@ -2745,7 +2758,7 @@ service cloud.firestore {
       }
 
       function connectFirebase() {
-        const room = (document.getElementById('fbRoomInput') ? document.getElementById('fbRoomInput').value : '').trim();
+        const room = (document.getElementById('fbRoomInput') ? document.getElementById('fbRoomInput').value : '').trim().toLowerCase();
         const cfgStr = (document.getElementById('fbConfigInput') ? document.getElementById('fbConfigInput').value : '').trim();
 
         if (!room) {
@@ -2763,8 +2776,10 @@ service cloud.firestore {
         saveCloudConfig();
 
         initFirebaseSync();
+        // Immediately push current local save to cloud so room has this device's progress
+        pushToFirebase(true);
         playSfx('sync');
-        showToast('Connecting to Firebase...');
+        showToast('Connecting to Firebase & syncing...');
       }
 
       function forcePushCloud() {
