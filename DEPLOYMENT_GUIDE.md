@@ -79,9 +79,25 @@ To keep your quest progress in sync between your phone, tablet, and PC automatic
 2. Click the orange **"Create database"** button.
 3. In the setup modal:
    - Database ID: leave as `(default)`.
-   - Security Rules: Select **"Start in test mode"** (allows immediate read/write access for your devices).
+   - Security Rules: Select **"Start in test mode"** (or production).
    - Location: Choose your closest region (or leave default).
    - Click **Enable**.
+
+### Step 2.1: Add Permanent Security Rules (Never Expires!)
+By default, Firebase test mode expires in 30 days and cuts off sync. To keep sync working forever without 30-day expiration:
+1. In Firestore Database, click the **"Rules"** tab at the top.
+2. Replace whatever is inside the editor with:
+   ```javascript
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /inicet_saves/{document=**} {
+         allow read, write: if true;
+       }
+     }
+   }
+   ```
+3. Click the blue **"Publish"** button.
 
 ### Step 3: Copy Your Web App Config
 1. In the top left, click the gear icon ⚙️ next to "Project Overview", then click **Project settings**.
@@ -101,14 +117,18 @@ To keep your quest progress in sync between your phone, tablet, and PC automatic
    }
    ```
 
-### Step 4: Connect INI-CET Quest
+### Step 4: Connect & Test INI-CET Quest
 1. Open your hosted INI-CET Quest website on your computer.
 2. In the top HUD, click the **`☁️ SYNC: LOCAL`** button (or click **`⚡ WARP CRYSTAL`** in the Guild Armory).
 3. In the **🔥 FIREBASE LIVE** tab:
    - **Secret Sync Room Code:** Type any memorable passphrase (e.g. `dr-dungeon-2026`) or click **`🎲 RANDOM`**.
    - **Firebase Web App Config:** Paste the config snippet you copied in Step 3.
-4. Click **`💾 CONNECT & ENABLE LIVE SYNC`**.
-5. The HUD indicator will immediately turn green: **`☁️ CLOUD: LIVE`**!
+4. Click **`🧪 TEST CONNECTION`**:
+   - The app runs a read/write test to verify your Firestore rules.
+   - If rules or config have an issue, a detailed diagnostic card explains how to fix it in 1 click.
+   - If verified, it automatically connects and syncs!
+5. Or click **`💾 CONNECT & ENABLE LIVE SYNC`**.
+6. The HUD indicator turns green: **`☁️ CLOUD: LIVE`**, and **Last sync** updates to the current time!
 
 ---
 
