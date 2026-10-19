@@ -1556,6 +1556,9 @@ service cloud.firestore {
           firestoreDb.settings({ experimentalForceLongPolling: true });
         } catch (e) {}
 
+        if (cloudConfig.firebaseRoom) {
+          cloudConfig.firebaseRoom = cloudConfig.firebaseRoom.trim().toLowerCase();
+        }
         const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
 
         firestoreUnsub = docRef.onSnapshot({ includeMetadataChanges: true }, (doc) => {
@@ -1627,9 +1630,10 @@ service cloud.firestore {
 
     function handleIncomingRemoteState(remoteState, remoteUpdatedAt) {
       const merged = mergeSaveStates(state, remoteState);
-      const hasChanges = JSON.stringify(merged) !== JSON.stringify(state);
+      const hasLocalChanges = JSON.stringify(merged) !== JSON.stringify(state);
+      const hasRemoteChanges = JSON.stringify(merged) !== JSON.stringify(remoteState);
 
-      if (hasChanges) {
+      if (hasLocalChanges) {
         isRemoteSyncUpdate = true;
         state = merged;
         localStorage.setItem(SAVE_KEY, JSON.stringify(state));
@@ -1638,6 +1642,10 @@ service cloud.firestore {
         play8BitSfx('sync');
         logBattle('⚡ WARP SYNC: Progress synchronized from cloud!', 'heal');
         showToast('☁️ Cloud progress synced!');
+      }
+
+      if (hasRemoteChanges) {
+        pushToFirebase(true);
       }
 
       cloudConfig.lastSyncTime = Date.now();
@@ -1996,7 +2004,7 @@ service cloud.firestore {
     }
 
     function connectFirebase() {
-      const room = document.getElementById('fbRoomInput').value.trim();
+      const room = document.getElementById('fbRoomInput').value.trim().toLowerCase();
       const cfgStr = document.getElementById('fbConfigInput').value.trim();
 
       if (!room) {
@@ -2014,8 +2022,9 @@ service cloud.firestore {
       saveCloudConfig();
 
       initFirebaseSync();
+      pushToFirebase(true);
       play8BitSfx('sync');
-      showToast('Connecting to Firebase...');
+      showToast('Connecting to Firebase & syncing...');
     }
 
     function forcePushCloud() {
