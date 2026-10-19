@@ -1384,20 +1384,21 @@
 
     function handleFirebaseError(err, context) {
       const msg = err && err.message ? err.message : String(err);
+      const lower = msg.toLowerCase();
       let diagHtml = '';
 
-      if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+      if (lower.includes('permission') || lower.includes('insufficient permissions')) {
         diagHtml = `
           <div style="background:rgba(255,42,85,0.15); border:1px solid var(--hp-red); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
             <div style="color:var(--hp-red); font-weight:bold; margin-bottom:0.3rem;">⚠️ PERMISSION DENIED (Firestore Security Rules)</div>
             <div style="color:var(--text-light); line-height:1.4;">
-              Firebase Firestore is blocking read/write access. This happens if test mode expired or default rules are set to false.
+              Google Firestore is blocking read/write access. This happens if test mode expired or default rules are set to false.
             </div>
             <div style="margin-top:0.4rem; color:var(--mana-cyan); font-weight:bold;">FIX IN 30 SECONDS:</div>
             <ol style="margin:0.2rem 0 0.4rem 1.2rem; color:var(--text-muted); font-size:0.72rem; line-height:1.4;">
               <li>Open <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan); text-decoration:underline;">console.firebase.google.com</a> & select your project.</li>
               <li>In left sidebar, click <strong>Build &rarr; Firestore Database</strong> &rarr; click <strong>Rules</strong> tab at top.</li>
-              <li>Replace the rules with this snippet and click <strong>Publish</strong>:</li>
+              <li>Replace the rules editor content with this snippet and click <strong>Publish</strong>:</li>
             </ol>
             <pre style="background:#090714; border:1px solid #3b3260; color:#22c55e; padding:0.4rem 0.6rem; font-size:0.68rem; border-radius:3px; overflow-x:auto; user-select:all;">rules_version = '2';
 service cloud.firestore {
@@ -1411,12 +1412,50 @@ service cloud.firestore {
               After clicking Publish in Firebase, click <strong>"🧪 TEST CONNECTION"</strong> below!
             </div>
           </div>`;
-      } else if (msg.includes('not-found') || msg.includes('database')) {
+      } else if (lower.includes('database') && (lower.includes('not created') || lower.includes('not exist') || lower.includes('not-found'))) {
         diagHtml = `
           <div style="background:rgba(255,159,28,0.15); border:1px solid var(--slump-amber); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
             <div style="color:var(--slump-amber); font-weight:bold;">⚠️ FIRESTORE DATABASE NOT CREATED</div>
             <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
-              In <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan); text-decoration:underline;">Firebase Console</a>, go to <strong>Build &rarr; Firestore Database</strong> and click <strong>"Create database"</strong>.
+              Your Firebase project exists, but the Firestore Database has not been provisioned yet.<br>
+              <strong>How to fix:</strong> Open <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan); text-decoration:underline;">console.firebase.google.com</a> &rarr; go to <strong>Build &rarr; Firestore Database</strong> &rarr; click <strong>"Create database"</strong> &rarr; select <strong>Test mode</strong> &rarr; click <strong>Enable</strong>.
+            </div>
+          </div>`;
+      } else if (lower.includes('ad-blocker') || lower.includes('cannot reach') || lower.includes('failed to fetch')) {
+        diagHtml = `
+          <div style="background:rgba(255,159,28,0.15); border:1px solid var(--slump-amber); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+            <div style="color:var(--slump-amber); font-weight:bold;">⚠️ BLOCKED BY AD-BLOCKER OR NETWORK FIREWALL</div>
+            <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+              Your browser or network is blocking communication with <code>firestore.googleapis.com</code>.<br>
+              <strong>How to fix:</strong>
+              <ul style="margin:0.2rem 0 0.3rem 1.2rem; color:var(--text-muted); font-size:0.72rem; line-height:1.4;">
+                <li>Temporarily disable ad-blocker extensions (uBlock Origin, Brave Shields, Privacy Badger, Pi-hole).</li>
+                <li>If on college/hospital/corporate WiFi, try switching to mobile data hotspot.</li>
+              </ul>
+            </div>
+          </div>`;
+      } else if (lower.includes('api key') || lower.includes('api_key')) {
+        diagHtml = `
+          <div style="background:rgba(255,42,85,0.15); border:1px solid var(--hp-red); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+            <div style="color:var(--hp-red); font-weight:bold;">⚠️ INVALID FIREBASE API KEY</div>
+            <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+              Google rejected the API key provided in your Firebase configuration.<br>
+              Go to <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan); text-decoration:underline;">Firebase Console</a> &rarr; ⚙️ Project Settings &rarr; scroll to "Your apps" &rarr; re-copy the <code>firebaseConfig</code> object.
+            </div>
+          </div>`;
+      } else if (lower.includes('timed out') || lower.includes('timeout') || lower.includes('deadline')) {
+        diagHtml = `
+          <div style="background:rgba(255,159,28,0.15); border:1px solid var(--slump-amber); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+            <div style="color:var(--slump-amber); font-weight:bold;">⚠️ FIREBASE OPERATION TIMED OUT</div>
+            <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+              Firebase did not acknowledge the request within the timeout limit.<br>
+              Common causes:
+              <ul style="margin:0.2rem 0 0.3rem 1.2rem; color:var(--text-muted); font-size:0.72rem; line-height:1.4;">
+                <li><strong>Security Rules:</strong> Firestore may be silently dropping write requests. Ensure rules allow write to <code>inicet_saves</code>.</li>
+                <li><strong>Firestore Database Not Created:</strong> Ensure Firestore Database is created in Firebase Console (Build &rarr; Firestore Database).</li>
+                <li><strong>Ad-blocker or Network:</strong> Check if a browser extension is blocking <code>firestore.googleapis.com</code>.</li>
+              </ul>
+              Click <strong>"🧪 TEST CONNECTION"</strong> below to run diagnostic tests!
             </div>
           </div>`;
       } else {
@@ -1513,6 +1552,9 @@ service cloud.firestore {
         }
 
         firestoreDb = firebase.firestore(firebaseApp);
+        try {
+          firestoreDb.settings({ experimentalForceLongPolling: true });
+        } catch (e) {}
 
         const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
 
@@ -1671,7 +1713,7 @@ service cloud.firestore {
       }
 
       updateSyncStatusUI('connecting', `Testing read & write permissions to Room [${room}]...`, 
-        '<div style="background:rgba(0,229,255,0.1); border:1px solid var(--mana-cyan); padding:0.6rem; border-radius:4px; font-size:0.75rem;"><div style="color:var(--mana-cyan); font-weight:bold;">⏳ Testing connection to Firebase...</div><div style="color:var(--text-light); margin-top:0.2rem;">Checking project credentials and Firestore read/write permissions...</div></div>'
+        '<div style="background:rgba(0,229,255,0.1); border:1px solid var(--mana-cyan); padding:0.6rem; border-radius:4px; font-size:0.75rem;"><div style="color:var(--mana-cyan); font-weight:bold;">⏳ Testing connection to Firebase...</div><div style="color:var(--text-light); margin-top:0.2rem;">Checking project credentials, Firestore Security Rules, and network transport...</div></div>'
       );
       showToast('Testing Firebase connection...');
 
@@ -1682,24 +1724,107 @@ service cloud.firestore {
           throw new Error('Config missing required "apiKey" or "projectId"');
         }
 
+        // -------------------------------------------------------------------
+        // STEP 1: REST Read Probe (Instant check of Project ID & Database)
+        // -------------------------------------------------------------------
+        try {
+          const probeUrl = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(cfg.projectId) + '/databases/(default)/documents/inicet_saves/' + encodeURIComponent(room) + '?key=' + encodeURIComponent(cfg.apiKey);
+          const probeRes = await promiseWithTimeout(fetch(probeUrl), 4000, 'Network request to Google Firestore timed out (4s)');
+          const probeJson = await probeRes.json().catch(() => ({}));
+
+          if (!probeRes.ok) {
+            const errObj = probeJson.error || {};
+            const errCode = errObj.code || probeRes.status;
+            const errMsg = errObj.message || probeRes.statusText || '';
+            const errStatus = errObj.status || '';
+
+            if (errCode === 404 && (errMsg.includes('database') || errMsg.includes('not exist') || (errMsg.includes('not found') && !errMsg.includes('Document')))) {
+              throw new Error('Firestore Database not created yet in Firebase Console! Message: "' + errMsg + '". Please open console.firebase.google.com -> Build -> Firestore Database -> Create database.');
+            }
+
+            if (errCode === 403 || errStatus === 'PERMISSION_DENIED') {
+              if (errMsg.includes('API key not valid') || errMsg.includes('API_KEY_INVALID')) {
+                throw new Error('API key is invalid! Google returned: "' + errMsg + '". Please verify the apiKey in your Firebase config.');
+              }
+              throw new Error('Missing or insufficient permissions (Firestore Security Rules). In Firebase Console -> Firestore Database -> Rules tab, replace rules with the snippet and click Publish.');
+            }
+
+            if (!(errCode === 404 && (errMsg.includes('Document') || errMsg.includes('inicet_saves')))) {
+              throw new Error('Google Firestore returned HTTP ' + errCode + ': ' + errMsg);
+            }
+          }
+        } catch (probeErr) {
+          if (probeErr.name === 'TypeError' || (probeErr.message && probeErr.message.includes('fetch'))) {
+            throw new Error('Cannot reach firestore.googleapis.com! Your browser, ad-blocker (uBlock, Brave Shields, Pi-hole), or network is blocking Google Firebase APIs.');
+          }
+          throw probeErr;
+        }
+
+        // -------------------------------------------------------------------
+        // STEP 2: REST Write Probe (Tests write permission directly via HTTP)
+        // -------------------------------------------------------------------
+        try {
+          const testPing = Date.now();
+          const restWriteUrl = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(cfg.projectId) + '/databases/(default)/documents/inicet_saves/' + encodeURIComponent(room) + '?key=' + encodeURIComponent(cfg.apiKey);
+          const writeProbeRes = await promiseWithTimeout(fetch(restWriteUrl, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fields: {
+                _probePing: { integerValue: String(testPing) }
+              }
+            })
+          }), 4000, 'Network write request to Google Firestore timed out (4s)');
+          const writeJson = await writeProbeRes.json().catch(() => ({}));
+
+          if (!writeProbeRes.ok) {
+            const errObj = writeJson.error || {};
+            const errCode = errObj.code || writeProbeRes.status;
+            const errMsg = errObj.message || writeProbeRes.statusText || '';
+            const errStatus = errObj.status || '';
+
+            if (errCode === 404 && (errMsg.includes('database') || errMsg.includes('not exist') || errMsg.includes('not found'))) {
+              throw new Error('Firestore Database not created yet in Firebase Console! Go to console.firebase.google.com -> Build -> Firestore Database -> click Create database.');
+            }
+
+            if (errCode === 403 || errStatus === 'PERMISSION_DENIED') {
+              if (errMsg.includes('API key not valid') || errMsg.includes('API_KEY_INVALID')) {
+                throw new Error('API key is invalid! Please verify the apiKey in your Firebase config.');
+              }
+              throw new Error('Missing or insufficient permissions (Firestore Security Rules). In Firebase Console -> Firestore Database -> Rules tab, replace rules with the snippet and click Publish.');
+            }
+
+            throw new Error('Google Firestore write returned HTTP ' + errCode + ': ' + errMsg);
+          }
+        } catch (writeErr) {
+          if (writeErr.name === 'TypeError' || (writeErr.message && writeErr.message.includes('fetch'))) {
+            throw new Error('Cannot reach firestore.googleapis.com! Your browser, ad-blocker, or network is blocking Google Firebase APIs.');
+          }
+          throw writeErr;
+        }
+
+        // -------------------------------------------------------------------
+        // STEP 3: SDK Integration with Force Long Polling (Bypasses streaming hangs)
+        // -------------------------------------------------------------------
         const testAppName = 'test_conn_' + Date.now();
         testApp = firebase.initializeApp(cfg, testAppName);
         const db = firebase.firestore(testApp);
+        try {
+          db.settings({ experimentalForceLongPolling: true });
+        } catch (e) {}
 
         const testDoc = db.collection('inicet_saves').doc(room);
         const testPing = Date.now();
         const cleanState = JSON.parse(JSON.stringify(state));
 
-        // 1. Test Write with 8s timeout
         await promiseWithTimeout(testDoc.set({
           state: cleanState,
           updatedAt: testPing,
           clientDevice: (navigator.userAgent || '').substring(0, 100),
           _testPing: testPing
-        }, { merge: true }), 8000, 'Firestore write timed out after 8s. Firebase server did not acknowledge the write.');
+        }, { merge: true }), 6000, 'Firestore SDK write confirmation timed out after 6s.');
 
-        // 2. Test Read directly from server with 8s timeout
-        const snap = await promiseWithTimeout(testDoc.get({ source: 'server' }), 8000, 'Firestore read timed out after 8s.');
+        const snap = await promiseWithTimeout(testDoc.get({ source: 'server' }), 6000, 'Firestore SDK read confirmation timed out after 6s.');
         if (!snap.exists) {
           throw new Error('Write succeeded but document read back was empty.');
         }
