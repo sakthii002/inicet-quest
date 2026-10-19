@@ -1253,6 +1253,21 @@
       throw new Error('Invalid Firebase config. Could not find apiKey and projectId.');
     }
 
+    function promiseWithTimeout(promise, ms, timeoutMessage) {
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(timeoutMessage || (`Operation timed out after ${ms / 1000}s`)));
+        }, ms);
+        Promise.resolve(promise).then((res) => {
+          clearTimeout(timer);
+          resolve(res);
+        }, (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+      });
+    }
+
     function mergeSaveStates(local, remote) {
       if (!remote) return local;
       const merged = { ...local };
@@ -1458,7 +1473,30 @@ service cloud.firestore {
         firestoreUnsub = null;
       }
 
+      if (window._firebaseConnectTimeout) {
+        clearTimeout(window._firebaseConnectTimeout);
+        window._firebaseConnectTimeout = null;
+      }
+      if (window._firebasePendingTimeout) {
+        clearTimeout(window._firebasePendingTimeout);
+        window._firebasePendingTimeout = null;
+      }
+
       updateSyncStatusUI('connecting', `Connecting to Room [${cloudConfig.firebaseRoom}]...`, '');
+
+      // 8-second watchdog for initial connection
+      window._firebaseConnectTimeout = setTimeout(() => {
+        if (currentSyncState.status === 'connecting') {
+          updateSyncStatusUI('error', 'Firebase connection timed out (8s)',
+            `<div style="background:rgba(255,159,28,0.15); border:1px solid var(--slump-amber); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+              <div style="color:var(--slump-amber); font-weight:bold;">⚠️ FIREBASE CONNECTION TIMED OUT</div>
+              <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+                Could not connect to Firebase within 8 seconds. Check your internet, ad-blocker, or Firestore project settings.
+              </div>
+            </div>`
+          );
+        }
+      }, 8000);
 
       try {
         if (firebase.apps && firebase.apps.length > 0) {
@@ -1479,14 +1517,40 @@ service cloud.firestore {
         const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
 
         firestoreUnsub = docRef.onSnapshot({ includeMetadataChanges: true }, (doc) => {
+          if (window._firebaseConnectTimeout) {
+            clearTimeout(window._firebaseConnectTimeout);
+            window._firebaseConnectTimeout = null;
+          }
+
+          const hasPendingWrites = !!(doc.metadata && doc.metadata.hasPendingWrites);
+
+          if (hasPendingWrites) {
+            updateSyncStatusUI('syncing', 'Uploading local changes to cloud...', '');
+            if (!window._firebasePendingTimeout) {
+              window._firebasePendingTimeout = setTimeout(() => {
+                window._firebasePendingTimeout = null;
+                if (currentSyncState.status === 'syncing') {
+                  updateSyncStatusUI('error', 'Cloud sync acknowledgment timed out (8s)',
+                    `<div style="background:rgba(255,159,28,0.15); border:1px solid var(--slump-amber); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+                      <div style="color:var(--slump-amber); font-weight:bold;">⚠️ CLOUD SYNC ACKNOWLEDGMENT TIMED OUT</div>
+                      <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+                        Local changes could not be confirmed by Firebase Cloud within 8 seconds. Check Firestore security rules or internet connection.
+                      </div>
+                    </div>`);
+                }
+              }, 8000);
+            }
+            return;
+          } else {
+            if (window._firebasePendingTimeout) {
+              clearTimeout(window._firebasePendingTimeout);
+              window._firebasePendingTimeout = null;
+            }
+          }
+
           if (!doc.exists) {
             updateSyncStatusUI('syncing', 'Room is new on cloud. Initializing cloud save...', '');
             pushToFirebase(true);
-            return;
-          }
-
-          if (doc.metadata && doc.metadata.hasPendingWrites) {
-            updateSyncStatusUI('syncing', 'Uploading local changes to cloud...', '');
             return;
           }
 
@@ -1497,11 +1561,23 @@ service cloud.firestore {
             pushToFirebase(true);
           }
         }, (err) => {
+          if (window._firebaseConnectTimeout) {
+            clearTimeout(window._firebaseConnectTimeout);
+            window._firebaseConnectTimeout = null;
+          }
+          if (window._firebasePendingTimeout) {
+            clearTimeout(window._firebasePendingTimeout);
+            window._firebasePendingTimeout = null;
+          }
           console.error('Firestore snapshot error:', err);
           handleFirebaseError(err, 'Live Listener Error');
         });
 
       } catch (err) {
+        if (window._firebaseConnectTimeout) {
+          clearTimeout(window._firebaseConnectTimeout);
+          window._firebaseConnectTimeout = null;
+        }
         console.error('Firebase init error:', err);
         handleFirebaseError(err, 'Init Error');
       }
@@ -1537,18 +1613,30 @@ service cloud.firestore {
 
         const cleanState = JSON.parse(JSON.stringify(state));
         const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
-        docRef.set({
+
+        const pushOp = docRef.set({
           state: cleanState,
           updatedAt: Date.now(),
           clientDevice: (navigator.userAgent || '').substring(0, 100)
-        }, { merge: true }).then(() => {
-          cloudConfig.lastSyncTime = Date.now();
-          saveCloudConfig();
-          updateSyncStatusUI('synced', `Synced with Room [${cloudConfig.firebaseRoom}]`, '');
-        }).catch(err => {
-          console.error('Firestore push error:', err);
-          handleFirebaseError(err, 'Cloud Write Failed');
-        });
+        }, { merge: true });
+
+        promiseWithTimeout(pushOp, 8000, 'Cloud write timed out after 8s. Firebase server did not acknowledge.')
+          .then(() => {
+            if (window._firebasePendingTimeout) {
+              clearTimeout(window._firebasePendingTimeout);
+              window._firebasePendingTimeout = null;
+            }
+            cloudConfig.lastSyncTime = Date.now();
+            saveCloudConfig();
+            updateSyncStatusUI('synced', `Synced with Room [${cloudConfig.firebaseRoom}]`, '');
+          }).catch(err => {
+            if (window._firebasePendingTimeout) {
+              clearTimeout(window._firebasePendingTimeout);
+              window._firebasePendingTimeout = null;
+            }
+            console.error('Firestore push error:', err);
+            handleFirebaseError(err, 'Cloud Write Failed');
+          });
       };
 
       if (immediate) {
@@ -1561,19 +1649,30 @@ service cloud.firestore {
     }
 
     async function testFirebaseConnection() {
+      const testBtn = document.getElementById('btnTestFirebase');
+      const origBtnText = testBtn ? testBtn.textContent : '🧪 TEST CONNECTION';
+      if (testBtn) {
+        testBtn.disabled = true;
+        testBtn.textContent = '⏳ TESTING...';
+      }
+
       const room = (document.getElementById('fbRoomInput') ? document.getElementById('fbRoomInput').value : '').trim();
       const cfgStr = (document.getElementById('fbConfigInput') ? document.getElementById('fbConfigInput').value : '').trim();
 
       if (!room) {
         showToast('Please enter or generate a Secret Room Code first');
+        if (testBtn) { testBtn.disabled = false; testBtn.textContent = origBtnText; }
         return;
       }
       if (!cfgStr) {
         showToast('Please paste your Firebase Web App config first');
+        if (testBtn) { testBtn.disabled = false; testBtn.textContent = origBtnText; }
         return;
       }
 
-      updateSyncStatusUI('connecting', `Testing read & write permissions to Room [${room}]...`, '');
+      updateSyncStatusUI('connecting', `Testing read & write permissions to Room [${room}]...`, 
+        '<div style="background:rgba(0,229,255,0.1); border:1px solid var(--mana-cyan); padding:0.6rem; border-radius:4px; font-size:0.75rem;"><div style="color:var(--mana-cyan); font-weight:bold;">⏳ Testing connection to Firebase...</div><div style="color:var(--text-light); margin-top:0.2rem;">Checking project credentials and Firestore read/write permissions...</div></div>'
+      );
       showToast('Testing Firebase connection...');
 
       let testApp = null;
@@ -1590,14 +1689,17 @@ service cloud.firestore {
         const testDoc = db.collection('inicet_saves').doc(room);
         const testPing = Date.now();
         const cleanState = JSON.parse(JSON.stringify(state));
-        await testDoc.set({
+
+        // 1. Test Write with 8s timeout
+        await promiseWithTimeout(testDoc.set({
           state: cleanState,
           updatedAt: testPing,
           clientDevice: (navigator.userAgent || '').substring(0, 100),
           _testPing: testPing
-        }, { merge: true });
+        }, { merge: true }), 8000, 'Firestore write timed out after 8s. Firebase server did not acknowledge the write.');
 
-        const snap = await testDoc.get();
+        // 2. Test Read directly from server with 8s timeout
+        const snap = await promiseWithTimeout(testDoc.get({ source: 'server' }), 8000, 'Firestore read timed out after 8s.');
         if (!snap.exists) {
           throw new Error('Write succeeded but document read back was empty.');
         }
@@ -1630,6 +1732,11 @@ service cloud.firestore {
         console.error('Test connection error:', err);
         handleFirebaseError(err, 'Connection Test Failed');
         showToast('❌ Connection test failed! See details above.');
+      } finally {
+        if (testBtn) {
+          testBtn.disabled = false;
+          testBtn.textContent = origBtnText;
+        }
       }
     }
 
