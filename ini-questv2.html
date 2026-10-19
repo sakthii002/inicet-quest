@@ -1505,6 +1505,9 @@
         </div>
       </div>
 
+      <!-- Live Sync Diagnostic / Alert Box -->
+      <div id="syncDiagBox" style="display:none; margin:0.6rem 0 0.8rem 0;"></div>
+
       <!-- Modal Tabs Navigation -->
       <div class="modal-tab-nav">
         <button type="button" class="pixel-btn tab-btn active" id="tabBtnFirebase" onclick="switchSyncTab('firebase')">🔥 FIREBASE LIVE</button>
@@ -1536,20 +1539,31 @@
         </div>
 
         <details class="setup-accordion">
-          <summary>📖 How to get your free Firebase config in 90 seconds (Step-by-Step)</summary>
+          <summary>📖 How to set up Firebase in 2 minutes (Step-by-Step with Rules)</summary>
           <div class="setup-steps">
             <p>1. Open <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan);">console.firebase.google.com</a> (sign in with your Google account).</p>
-            <p>2. Click <strong>"Add project"</strong> -> Name it <code>inicet-quest</code> -> Disable Google Analytics -> Click <strong>Create</strong>.</p>
-            <p>3. In the left sidebar, click <strong>"Build"</strong> -> <strong>"Firestore Database"</strong> -> Click <strong>"Create database"</strong>.</p>
-            <p>4. Choose <strong>"Start in test mode"</strong> (allows read/write) -> Pick default location -> Click <strong>Enable</strong>.</p>
-            <p>5. Click Project Overview (gear icon ⚙️ -> Project settings) -> Under "Your apps", click the Web icon <code>&lt;/&gt;</code> -> Register app -> Copy the <code>firebaseConfig = { ... }</code> snippet and paste it above!</p>
+            <p>2. Click <strong>"Add project"</strong> &rarr; Name it <code>inicet-quest</code> &rarr; Disable Google Analytics &rarr; Click <strong>Create</strong>.</p>
+            <p>3. In left sidebar, click <strong>"Build"</strong> &rarr; <strong>"Firestore Database"</strong> &rarr; Click <strong>"Create database"</strong>.</p>
+            <p>4. In database settings, select <strong>"Start in test mode"</strong> (or production) and click <strong>Enable</strong>.</p>
+            <p>5. <strong>🔥 CRITICAL STEP (Permanent Free Sync Rules):</strong> Click the <strong>"Rules"</strong> tab at top of Firestore Database, replace the editor content with this snippet, and click <strong>"Publish"</strong>:</p>
+            <pre style="background:#090714; border:1px solid #3b3260; color:#22c55e; padding:0.4rem 0.6rem; font-size:0.68rem; border-radius:4px; margin:0.3rem 0; overflow-x:auto; user-select:all;">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /inicet_saves/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre>
+            <p>6. In top left, click the gear icon ⚙️ &rarr; <strong>Project settings</strong> &rarr; Under "Your apps", click Web <code>&lt;/&gt;</code> &rarr; Register app &rarr; Copy the <code>firebaseConfig = { ... }</code> snippet and paste it above!</p>
+            <p>7. Click <strong>"🧪 TEST CONNECTION"</strong> below to verify read & write before connecting!</p>
           </div>
         </details>
 
         <div style="display:flex; gap:0.5rem; margin-top:1rem; flex-wrap:wrap;">
           <button type="button" class="pixel-btn btn-green" onclick="connectFirebase()">💾 CONNECT & ENABLE LIVE SYNC</button>
-          <button type="button" class="pixel-btn" onclick="forcePushCloud()">⬆️ FORCE PUSH TO CLOUD</button>
-          <button type="button" class="pixel-btn" onclick="forcePullCloud()">⬇️ FORCE PULL FROM CLOUD</button>
+          <button type="button" class="pixel-btn" id="btnTestFirebase" style="border-color:var(--mana-cyan); color:var(--mana-cyan);" onclick="testFirebaseConnection()">🧪 TEST CONNECTION</button>
+          <button type="button" class="pixel-btn" onclick="forcePushCloud()">⬆️ FORCE PUSH</button>
+          <button type="button" class="pixel-btn" onclick="forcePullCloud()">⬇️ FORCE PULL</button>
           <button type="button" class="pixel-btn btn-red" onclick="disconnectCloud()" style="margin-left:auto;">🔌 DISCONNECT</button>
         </div>
       </div>
@@ -1873,6 +1887,12 @@
       let isRemoteSyncUpdate = false;
       let syncPushTimeout = null;
 
+      let currentSyncState = {
+        status: 'none', // 'none' | 'connecting' | 'syncing' | 'synced' | 'error'
+        message: 'Progress saved in this browser only. Connect below for cross-device live sync.',
+        diagHtml: ''
+      };
+
       function loadCloudConfig() {
         const raw = safeGetStorage(CLOUD_SYNC_CONFIG_KEY);
         if (raw) {
@@ -1887,17 +1907,48 @@
       function parseFirebaseConfig(raw) {
         if (typeof raw === 'object' && raw !== null) return raw;
         const str = String(raw).trim();
-        try {
-          return JSON.parse(str);
-        } catch (e) {
-          const match = str.match(/\{[\s\S]*\}/);
-          if (match) {
-            try {
-              return (new Function('return ' + match[0]))();
-            } catch (e2) {}
-          }
-          throw new Error('Invalid Firebase config. Please paste the JSON or firebaseConfig object.');
+        // 1. Try direct JSON.parse
+        try { return JSON.parse(str); } catch (e) {}
+
+        // 2. Try matching explicit assignment: const/let/var firebaseConfig = { ... }
+        const namedMatch = str.match(/(?:const|let|var)?\s*firebaseConfig\s*=\s*(\{[\s\S]*?\})(?:;|\n|$)/);
+        if (namedMatch) {
+          try { return (new Function('return ' + namedMatch[1]))(); } catch (e2) {}
         }
+
+        // 3. Try finding object containing apiKey and projectId specifically (skipping import statements)
+        const objMatch = str.match(/\{[^{}]*?(?:apiKey|projectId)[\s\S]*?\}/);
+        if (objMatch) {
+          try { return (new Function('return ' + objMatch[0]))(); } catch (e3) {}
+        }
+
+        // 4. Try matching from first open brace to last closing brace
+        const firstBrace = str.indexOf('{');
+        const lastBrace = str.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          const candidate = str.substring(firstBrace, lastBrace + 1);
+          try { return (new Function('return ' + candidate))(); } catch (e4) {}
+        }
+
+        // 5. Fallback: extract individual keys
+        const apiKeyMatch = str.match(/apiKey\s*:\s*["']([^"']+)["']/);
+        const projectIdMatch = str.match(/projectId\s*:\s*["']([^"']+)["']/);
+        if (apiKeyMatch && projectIdMatch) {
+          const authDomainMatch = str.match(/authDomain\s*:\s*["']([^"']+)["']/);
+          const storageBucketMatch = str.match(/storageBucket\s*:\s*["']([^"']+)["']/);
+          const messagingSenderIdMatch = str.match(/messagingSenderId\s*:\s*["']([^"']+)["']/);
+          const appIdMatch = str.match(/appId\s*:\s*["']([^"']+)["']/);
+          return {
+            apiKey: apiKeyMatch[1],
+            projectId: projectIdMatch[1],
+            authDomain: authDomainMatch ? authDomainMatch[1] : `${projectIdMatch[1]}.firebaseapp.com`,
+            storageBucket: storageBucketMatch ? storageBucketMatch[1] : `${projectIdMatch[1]}.appspot.com`,
+            messagingSenderId: messagingSenderIdMatch ? messagingSenderIdMatch[1] : '',
+            appId: appIdMatch ? appIdMatch[1] : ''
+          };
+        }
+
+        throw new Error('Invalid Firebase config. Could not find apiKey and projectId.');
       }
 
       function mergeSaveStates(local, remote) {
@@ -1962,7 +2013,11 @@
         return merged;
       }
 
-      function updateSyncStatusUI(status, label) {
+      function updateSyncStatusUI(status, label, diagHtml) {
+        if (status !== undefined && status !== null) currentSyncState.status = status;
+        if (label !== undefined && label !== null) currentSyncState.message = label;
+        if (diagHtml !== undefined) currentSyncState.diagHtml = diagHtml;
+
         const hudLed = document.getElementById('hudSyncLed');
         const hudText = document.getElementById('hudSyncText');
         const modalLed = document.getElementById('modalSyncLed');
@@ -1970,6 +2025,9 @@
         const modalSub = document.getElementById('modalStatusSub');
         const modalRoom = document.getElementById('modalRoomDisplay');
         const modalLastSync = document.getElementById('modalLastSyncTime');
+        const diagBox = document.getElementById('syncDiagBox');
+
+        const curStatus = currentSyncState.status;
 
         const ledClassMap = {
           'synced': 'sync-led-green',
@@ -1979,21 +2037,21 @@
           'none': 'sync-led-off'
         };
 
-        const ledClass = ledClassMap[status] || 'sync-led-off';
+        const ledClass = ledClassMap[curStatus] || 'sync-led-off';
 
         if (hudLed) hudLed.className = 'sync-led ' + ledClass;
         if (modalLed) modalLed.className = 'sync-led ' + ledClass;
 
-        if (status === 'synced') {
+        if (curStatus === 'synced') {
           if (hudText) hudText.textContent = '☁️ CLOUD: LIVE';
           if (modalTitle) modalTitle.textContent = 'STATUS: ONLINE & IN SYNC';
-        } else if (status === 'syncing') {
+        } else if (curStatus === 'syncing') {
           if (hudText) hudText.textContent = '☁️ SYNCING...';
           if (modalTitle) modalTitle.textContent = 'STATUS: SYNCING...';
-        } else if (status === 'connecting') {
+        } else if (curStatus === 'connecting') {
           if (hudText) hudText.textContent = '☁️ CONNECTING...';
           if (modalTitle) modalTitle.textContent = 'STATUS: CONNECTING...';
-        } else if (status === 'error') {
+        } else if (curStatus === 'error') {
           if (hudText) hudText.textContent = '⚠️ SYNC ERROR';
           if (modalTitle) modalTitle.textContent = 'STATUS: SYNC ERROR';
         } else {
@@ -2001,7 +2059,9 @@
           if (modalTitle) modalTitle.textContent = 'STATUS: LOCAL ONLY';
         }
 
-        if (modalSub && label) modalSub.textContent = label;
+        if (modalSub && currentSyncState.message) {
+          modalSub.textContent = currentSyncState.message;
+        }
 
         if (modalRoom) {
           if (cloudConfig.provider === 'firebase' && cloudConfig.firebaseRoom) {
@@ -2021,6 +2081,64 @@
             modalLastSync.textContent = 'Last sync: Never';
           }
         }
+
+        if (diagBox) {
+          if ((curStatus === 'error' || curStatus === 'synced') && currentSyncState.diagHtml) {
+            diagBox.style.display = 'block';
+            diagBox.innerHTML = currentSyncState.diagHtml;
+          } else {
+            diagBox.style.display = 'none';
+            diagBox.innerHTML = '';
+          }
+        }
+      }
+
+      function handleFirebaseError(err, context) {
+        const msg = err && err.message ? err.message : String(err);
+        let diagHtml = '';
+
+        if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+          diagHtml = `
+            <div style="background:rgba(255,42,85,0.15); border:1px solid var(--hp-red); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+              <div style="color:var(--hp-red); font-weight:bold; margin-bottom:0.3rem;">⚠️ PERMISSION DENIED (Firestore Security Rules)</div>
+              <div style="color:var(--text-light); line-height:1.4;">
+                Firebase Firestore is blocking read/write access. This happens if test mode expired or default rules are set to false.
+              </div>
+              <div style="margin-top:0.4rem; color:var(--mana-cyan); font-weight:bold;">FIX IN 30 SECONDS:</div>
+              <ol style="margin:0.2rem 0 0.4rem 1.2rem; color:var(--text-muted); font-size:0.72rem; line-height:1.4;">
+                <li>Open <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan); text-decoration:underline;">console.firebase.google.com</a> & select your project.</li>
+                <li>In left sidebar, click <strong>Build &rarr; Firestore Database</strong> &rarr; click <strong>Rules</strong> tab at top.</li>
+                <li>Replace the rules with this snippet and click <strong>Publish</strong>:</li>
+              </ol>
+              <pre style="background:#090714; border:1px solid #3b3260; color:#22c55e; padding:0.4rem 0.6rem; font-size:0.68rem; border-radius:3px; overflow-x:auto; user-select:all;">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /inicet_saves/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre>
+              <div style="margin-top:0.4rem; color:var(--gold); font-size:0.7rem;">
+                After clicking Publish in Firebase, click <strong>"🧪 TEST CONNECTION"</strong> below!
+              </div>
+            </div>`;
+        } else if (msg.includes('not-found') || msg.includes('database')) {
+          diagHtml = `
+            <div style="background:rgba(255,159,28,0.15); border:1px solid var(--slump-amber); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+              <div style="color:var(--slump-amber); font-weight:bold;">⚠️ FIRESTORE DATABASE NOT CREATED</div>
+              <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+                In <a href="https://console.firebase.google.com" target="_blank" style="color:var(--mana-cyan); text-decoration:underline;">Firebase Console</a>, go to <strong>Build &rarr; Firestore Database</strong> and click <strong>"Create database"</strong>.
+              </div>
+            </div>`;
+        } else {
+          diagHtml = `
+            <div style="background:rgba(255,42,85,0.15); border:1px solid var(--hp-red); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+              <div style="color:var(--hp-red); font-weight:bold;">⚠️ ${context || 'Firebase Sync Error'}</div>
+              <div style="color:var(--text-light); font-size:0.72rem; margin-top:0.3rem; word-break:break-all;">${msg}</div>
+            </div>`;
+        }
+
+        updateSyncStatusUI('error', (context ? context + ': ' : '') + msg, diagHtml);
       }
 
       function initCloudSync() {
@@ -2030,61 +2148,88 @@
         } else if (cloudConfig.provider === 'gist' && cloudConfig.gistToken) {
           syncWithGist('pull');
         } else {
-          updateSyncStatusUI('none', 'Progress saved locally. Connect a cloud provider for automatic cross-device sync.');
+          updateSyncStatusUI('none', 'Progress saved in this browser only. Connect below for cross-device live sync.', '');
         }
       }
 
-      function initFirebaseSync() {
+      async function initFirebaseSync() {
         if (!window.firebase) {
-          updateSyncStatusUI('error', 'Firebase library not loaded (offline or CDN blocked)');
+          updateSyncStatusUI('error', 'Firebase library not loaded (offline or CDN blocked)',
+            '<div style="background:rgba(255,42,85,0.15); border:1px solid var(--hp-red); padding:0.6rem; border-radius:4px; font-size:0.75rem;"><div style="color:var(--hp-red); font-weight:bold;">⚠️ Firebase CDN could not be loaded</div><div style="color:var(--text-light); margin-top:0.2rem;">Check your internet connection or ad-blocker.</div></div>');
           return;
         }
         if (!cloudConfig.firebaseConfigStr || !cloudConfig.firebaseRoom) {
-          updateSyncStatusUI('none', 'Local only (no Firebase config)');
+          updateSyncStatusUI('none', 'Local only (no Firebase config)', '');
           return;
         }
 
+        let cfg;
         try {
-          const cfg = parseFirebaseConfig(cloudConfig.firebaseConfigStr);
-          if (!firebaseApp) {
-            firebaseApp = firebase.apps && firebase.apps.length ? firebase.apps[0] : firebase.initializeApp(cfg);
+          cfg = parseFirebaseConfig(cloudConfig.firebaseConfigStr);
+          if (!cfg.apiKey || !cfg.projectId) {
+            throw new Error('Config is missing required "apiKey" or "projectId"');
           }
+        } catch (err) {
+          console.error('Firebase config error:', err);
+          updateSyncStatusUI('error', 'Firebase config error: ' + err.message,
+            `<div style="background:rgba(255,42,85,0.15); border:1px solid var(--hp-red); padding:0.6rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+              <div style="color:var(--hp-red); font-weight:bold;">⚠️ Invalid Firebase Configuration</div>
+              <div style="color:var(--text-light); margin-top:0.2rem;">Make sure you copy the <code>firebaseConfig = { ... }</code> object from Firebase Console &rarr; Project Settings.</div>
+            </div>`);
+          return;
+        }
+
+        if (firestoreUnsub) {
+          try { firestoreUnsub(); } catch (e) {}
+          firestoreUnsub = null;
+        }
+
+        updateSyncStatusUI('connecting', 'Connecting to Room [' + cloudConfig.firebaseRoom + ']...', '');
+
+        try {
+          if (firebase.apps && firebase.apps.length > 0) {
+            const existing = firebase.apps[0];
+            const exOpts = existing.options || {};
+            if (exOpts.projectId !== cfg.projectId || exOpts.apiKey !== cfg.apiKey) {
+              try { await existing.delete(); } catch (e) {}
+              firebaseApp = firebase.initializeApp(cfg);
+            } else {
+              firebaseApp = existing;
+            }
+          } else {
+            firebaseApp = firebase.initializeApp(cfg);
+          }
+
           firestoreDb = firebase.firestore(firebaseApp);
-
-          try {
-            firestoreDb.enablePersistence({ synchronizeTabs: true }).catch(function() {});
-          } catch (err) {}
-
-          updateSyncStatusUI('connecting', 'Connecting to Room [' + cloudConfig.firebaseRoom + ']...');
-
-          if (firestoreUnsub) firestoreUnsub();
 
           const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
 
-          firestoreUnsub = docRef.onSnapshot(function(doc) {
+          firestoreUnsub = docRef.onSnapshot({ includeMetadataChanges: true }, function(doc) {
             if (!doc.exists) {
-              updateSyncStatusUI('synced', 'Connected to Room [' + cloudConfig.firebaseRoom + ']. Initializing cloud save...');
+              updateSyncStatusUI('syncing', 'Room is new on cloud. Initializing cloud save...', '');
               pushToFirebase(true);
               return;
             }
 
             if (doc.metadata && doc.metadata.hasPendingWrites) {
-              updateSyncStatusUI('synced', 'Synced with Room [' + cloudConfig.firebaseRoom + ']');
+              updateSyncStatusUI('syncing', 'Uploading local changes to cloud...', '');
               return;
             }
 
             const remoteData = doc.data();
             if (remoteData && remoteData.state) {
               handleIncomingRemoteState(remoteData.state, remoteData.updatedAt);
+            } else {
+              pushToFirebase(true);
             }
           }, function(err) {
             console.error('Firestore snapshot error:', err);
-            updateSyncStatusUI('error', 'Firebase error: ' + err.message);
+            handleFirebaseError(err, 'Live Listener Error');
           });
 
         } catch (err) {
           console.error('Firebase init error:', err);
-          updateSyncStatusUI('error', 'Firebase config error: ' + err.message);
+          handleFirebaseError(err, 'Init Error');
         }
       }
 
@@ -2105,7 +2250,7 @@
 
         cloudConfig.lastSyncTime = Date.now();
         saveCloudConfig();
-        updateSyncStatusUI('synced', 'Synced with Room [' + cloudConfig.firebaseRoom + ']');
+        updateSyncStatusUI('synced', 'Synced with Room [' + cloudConfig.firebaseRoom + ']', '');
       }
 
       function pushToFirebase(immediate) {
@@ -2114,20 +2259,21 @@
         const doPush = function() {
           state.lastUpdated = Date.now();
           safeSetStorage(SAVE_KEY, JSON.stringify(state));
-          updateSyncStatusUI('syncing', 'Syncing to cloud...');
+          updateSyncStatusUI('syncing', 'Syncing changes to cloud...', '');
 
+          const cleanState = JSON.parse(JSON.stringify(state));
           const docRef = firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom);
           docRef.set({
-            state: state,
+            state: cleanState,
             updatedAt: Date.now(),
-            clientDevice: navigator.userAgent
+            clientDevice: (navigator.userAgent || '').substring(0, 100)
           }, { merge: true }).then(function() {
             cloudConfig.lastSyncTime = Date.now();
             saveCloudConfig();
-            updateSyncStatusUI('synced', 'Synced with Room [' + cloudConfig.firebaseRoom + ']');
+            updateSyncStatusUI('synced', 'Synced with Room [' + cloudConfig.firebaseRoom + ']', '');
           }).catch(function(err) {
             console.error('Firestore push error:', err);
-            updateSyncStatusUI('error', 'Sync write failed: ' + err.message);
+            handleFirebaseError(err, 'Cloud Write Failed');
           });
         };
 
@@ -2135,8 +2281,81 @@
           doPush();
         } else {
           if (syncPushTimeout) clearTimeout(syncPushTimeout);
-          updateSyncStatusUI('syncing', 'Saving changes...');
+          updateSyncStatusUI('syncing', 'Saving changes...', '');
           syncPushTimeout = setTimeout(doPush, 600);
+        }
+      }
+
+      async function testFirebaseConnection() {
+        const room = (document.getElementById('fbRoomInput') ? document.getElementById('fbRoomInput').value : '').trim();
+        const cfgStr = (document.getElementById('fbConfigInput') ? document.getElementById('fbConfigInput').value : '').trim();
+
+        if (!room) {
+          showToast('Please enter or generate a Secret Room Code first');
+          return;
+        }
+        if (!cfgStr) {
+          showToast('Please paste your Firebase Web App config first');
+          return;
+        }
+
+        updateSyncStatusUI('connecting', 'Testing read & write permissions to Room [' + room + ']...', '');
+        showToast('Testing Firebase connection...');
+
+        let testApp = null;
+        try {
+          const cfg = parseFirebaseConfig(cfgStr);
+          if (!cfg.apiKey || !cfg.projectId) {
+            throw new Error('Config missing required "apiKey" or "projectId"');
+          }
+
+          const testAppName = 'test_conn_' + Date.now();
+          testApp = firebase.initializeApp(cfg, testAppName);
+          const db = firebase.firestore(testApp);
+
+          const testDoc = db.collection('inicet_saves').doc(room);
+          const testPing = Date.now();
+          const cleanState = JSON.parse(JSON.stringify(state));
+          await testDoc.set({
+            state: cleanState,
+            updatedAt: testPing,
+            clientDevice: (navigator.userAgent || '').substring(0, 100),
+            _testPing: testPing
+          }, { merge: true });
+
+          const snap = await testDoc.get();
+          if (!snap.exists) {
+            throw new Error('Write succeeded but document read back was empty.');
+          }
+
+          try { await testApp.delete(); } catch (e) {}
+
+          cloudConfig.provider = 'firebase';
+          cloudConfig.firebaseRoom = room;
+          cloudConfig.firebaseConfigStr = cfgStr;
+          cloudConfig.lastSyncTime = Date.now();
+          saveCloudConfig();
+
+          initFirebaseSync();
+          playSfx('sync');
+          showToast('✅ Firebase connection verified & in sync!');
+
+          const successHtml = `
+            <div style="background:rgba(34,197,94,0.15); border:1px solid var(--xp-green); padding:0.6rem 0.8rem; border-radius:4px; font-size:0.75rem; text-align:left;">
+              <div style="color:var(--xp-green); font-weight:bold;">✅ FIREBASE CLOUD SYNC IS 100% OPERATIONAL!</div>
+              <div style="color:var(--text-light); margin-top:0.3rem; line-height:1.4;">
+                Successfully connected, wrote, and read back your save from Firestore Room: <strong>${room}</strong>.<br>
+                All your study strikes, quests, and gear now sync instantly across your PC, Phone, and Tablet in real time!
+              </div>
+            </div>`;
+
+          updateSyncStatusUI('synced', 'Verified & in sync with Room [' + room + ']', successHtml);
+
+        } catch (err) {
+          if (testApp) { try { await testApp.delete(); } catch (e) {} }
+          console.error('Test connection error:', err);
+          handleFirebaseError(err, 'Connection Test Failed');
+          showToast('❌ Connection test failed! See details above.');
         }
       }
 
@@ -2246,10 +2465,7 @@
         if (gistIdInput) gistIdInput.value = cloudConfig.gistId || '';
 
         switchSyncTab(tab);
-        updateSyncStatusUI(
-          cloudConfig.provider === 'firebase' && firestoreDb ? 'synced' :
-          cloudConfig.provider === 'gist' && cloudConfig.gistId ? 'synced' : 'none'
-        );
+        updateSyncStatusUI(); // Re-render currentSyncState without overwriting!
       }
 
       function closeSyncModal() {
@@ -2306,6 +2522,10 @@
 
       function forcePushCloud() {
         if (cloudConfig.provider === 'firebase') {
+          if (!firestoreDb || !cloudConfig.firebaseRoom) {
+            showToast('Connect to Firebase first');
+            return;
+          }
           pushToFirebase(true);
           showToast('Pushing save to Firebase...');
         } else if (cloudConfig.provider === 'gist') {
@@ -2317,14 +2537,23 @@
 
       function forcePullCloud() {
         if (cloudConfig.provider === 'firebase') {
-          if (!firestoreDb || !cloudConfig.firebaseRoom) return;
+          if (!firestoreDb || !cloudConfig.firebaseRoom) {
+            showToast('Connect to Firebase first');
+            return;
+          }
+          updateSyncStatusUI('syncing', 'Pulling save from cloud...', '');
           firestoreDb.collection('inicet_saves').doc(cloudConfig.firebaseRoom).get().then(function(doc) {
             if (doc.exists && doc.data() && doc.data().state) {
               handleIncomingRemoteState(doc.data().state, doc.data().updatedAt);
               showToast('Save pulled from cloud!');
             } else {
-              showToast('No save found in this room');
+              showToast('No cloud save found in this room');
+              updateSyncStatusUI('synced', 'Room is currently empty on cloud', '');
             }
+          }).catch(function(err) {
+            console.error('Firestore pull error:', err);
+            handleFirebaseError(err, 'Cloud Pull Failed');
+            showToast('Cloud pull failed: ' + err.message);
           });
         } else if (cloudConfig.provider === 'gist') {
           syncWithGist('pull');
@@ -2335,10 +2564,13 @@
 
       function disconnectCloud() {
         if (confirm('Disconnect from cloud sync? Your local save on this device will NOT be deleted.')) {
-          if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
+          if (firestoreUnsub) {
+            try { firestoreUnsub(); } catch (e) {}
+            firestoreUnsub = null;
+          }
           cloudConfig.provider = 'none';
           saveCloudConfig();
-          updateSyncStatusUI('none', 'Disconnected. Local save active.');
+          updateSyncStatusUI('none', 'Disconnected. Local save active.', '');
           showToast('Cloud sync disconnected');
         }
       }
@@ -4279,8 +4511,21 @@
         if (document.visibilityState === 'visible') {
           if (cloudConfig && cloudConfig.provider === 'gist' && cloudConfig.gistToken && cloudConfig.gistId) {
             syncWithGist('pull');
+          } else if (cloudConfig && cloudConfig.provider === 'firebase' && cloudConfig.firebaseConfigStr && cloudConfig.firebaseRoom) {
+            if (!firestoreDb || !firestoreUnsub) {
+              initFirebaseSync();
+            }
           }
         }
+      });
+
+      window.addEventListener('online', function() {
+        if (cloudConfig && cloudConfig.provider === 'firebase') {
+          initFirebaseSync();
+        }
+      });
+      window.addEventListener('offline', function() {
+        updateSyncStatusUI('error', 'Device is offline (Wi-Fi disconnected)');
       });
 
       if ('serviceWorker' in navigator) {
